@@ -1,3 +1,9 @@
+# 1.16.0
+
+- fix: try the `hosts` list in the configured order. `init/2` built the list
+  with a prepending fold, which reversed it, so `{hosts, [A, B]}` tried `B`
+  first. The first entry is now tried first, as the README has always stated.
+
 # 1.15.4
 
 - fix: return clean, typed error reasons from failed connect attempts.

@@ -808,12 +808,10 @@ init([{host, Host} | Opts], State) ->
 init([{port, Port} | Opts], State) ->
     init(Opts, State#state{port = Port});
 init([{hosts, Hosts} | Opts], State) ->
-    Hosts1 =
-    lists:foldl(fun({Host, Port}, Acc) ->
-                    [{Host, Port}|Acc];
-                   (Host, Acc) ->
-                    [{Host, 1883}|Acc]
-                end, [], Hosts),
+    %% Keep the configured order: the list is tried head-first.
+    Hosts1 = lists:map(fun({Host, Port}) -> {Host, Port};
+                          (Host) -> {Host, 1883}
+                       end, Hosts),
     init(Opts, State#state{hosts = Hosts1});
 init([{tcp_opts, TcpOpts} | Opts], State = #state{sock_opts = SockOpts}) ->
     init(Opts, State#state{sock_opts = merge_opts(SockOpts, TcpOpts)});
