@@ -105,6 +105,10 @@ groups() ->
        t_init_external_secret,
        t_hosts_order_preserved,
        t_hosts_failover,
+       t_shuffle_hosts_order_varies,
+       t_shuffle_hosts_disabled,
+       t_shuffle_hosts_failover,
+       t_shuffle_hosts_single,
        t_connected,
        t_qos2_flow_autoack_never,
        t_ssl_error_client_reject_server,
@@ -1392,6 +1396,66 @@ t_hosts_failover(_Config) ->
                                          {{127,0,0,1}, ?TCP_PORT}]}]),
     {ok, _} = emqtt:connect(C),
     ok = emqtt:disconnect(C).
+
+%% With `shuffle_hosts', every connect attempt tries the hosts in a fresh
+%% random order: each attempt is a permutation of the configured list, and
+%% more than one permutation shows up over many attempts. With 3 hosts and
+%% 30 attempts, the chance that all attempts pick the same order is 6^-29.
+t_shuffle_hosts_order_varies(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    process_flag(trap_exit, true),
+    Hosts = [{{127,0,0,1}, 10001}, {{127,0,0,2}, 10002}, {{127,0,0,3}, 10003}],
+    ok = mock_connect_recorder(conn_mod(ConnFun)),
+    Orders = lists:map(
+               fun(_) ->
+                       {ok, C} = emqtt:start_link([{hosts, Hosts}, {shuffle_hosts, true}]),
+                       {error, {refused, _, _}} = emqtt:ConnFun(C),
+                       collect_connect_attempts()
+               end, lists:seq(1, 30)),
+    lists:foreach(fun(Order) -> ?assertEqual(Hosts, lists:sort(Order)) end, Orders),
+    ?assert(length(lists:usort(Orders)) > 1, Orders),
+    ok.
+
+%% `{shuffle_hosts, false}' keeps the configured order.
+t_shuffle_hosts_disabled(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    process_flag(trap_exit, true),
+    Hosts = [{{127,0,0,1}, 10001}, {{127,0,0,2}, 10002}, {{127,0,0,3}, 10003}],
+    ok = mock_connect_recorder(conn_mod(ConnFun)),
+    lists:foreach(
+      fun(_) ->
+              {ok, C} = emqtt:start_link([{hosts, Hosts}, {shuffle_hosts, false}]),
+              ?assertEqual({error, {refused, {127,0,0,3}, 10003}}, emqtt:ConnFun(C)),
+              ?assertEqual(Hosts, collect_connect_attempts())
+      end, lists:seq(1, 10)),
+    ok.
+
+%% With shuffling on and only the last configured host alive, every
+%% attempt still ends up connected.
+t_shuffle_hosts_failover(_Config) ->
+    Hosts = [{{127,0,0,1}, unused_port()},
+             {{127,0,0,1}, unused_port()},
+             {{127,0,0,1}, ?TCP_PORT}],
+    lists:foreach(
+      fun(_) ->
+              {ok, C} = emqtt:start_link([{hosts, Hosts}, {shuffle_hosts, true}]),
+              {ok, _} = emqtt:connect(C),
+              ok = emqtt:disconnect(C)
+      end, lists:seq(1, 10)),
+    ok.
+
+%% Shuffling a single-entry list, or the `host'/`port' fallback used when
+%% `hosts' is not set, is a no-op.
+t_shuffle_hosts_single(_Config) ->
+    {ok, C1} = emqtt:start_link([{hosts, [{{127,0,0,1}, ?TCP_PORT}]},
+                                 {shuffle_hosts, true}]),
+    {ok, _} = emqtt:connect(C1),
+    ok = emqtt:disconnect(C1),
+    {ok, C2} = emqtt:start_link([{host, {127,0,0,1}},
+                                 {port, ?TCP_PORT},
+                                 {shuffle_hosts, true}]),
+    {ok, _} = emqtt:connect(C2),
+    ok = emqtt:disconnect(C2).
 
 t_initialized(_) ->
     error('TODO').
